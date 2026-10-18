@@ -1,7 +1,7 @@
 # datetime/timezone — zamiana Unix timestamp z XML na datę w strefie UTC
 from datetime import datetime, timezone
-# Element — typ węzła drzewa XML; ParseError — błąd składni XML (np. niezamknięty znacznik)
-from xml.etree.ElementTree import Element, ParseError
+# ParseError — błąd składni XML (np. niezamknięty znacznik)
+from xml.etree.ElementTree import ParseError
 
 # DefusedXmlException — rzucany, gdy defusedxml wykryje atak (encje, XXE)
 from defusedxml import DefusedXmlException
@@ -14,23 +14,10 @@ from app.core.exceptions import NmapParseError
 from app.schemas.scan import ExtraPortsResult, HostResult, PortResult, ScanResult
 
 
-# JEDYNA publiczna funkcja modułu: tekst XML z nmapa → ScanResult albo NmapParseError
+# Tekst XML z nmapa → ScanResult albo NmapParseError.
+# Funkcja czyta XML od góry do dołu, w tej samej kolejności, w jakiej wygląda plik
 def parse_scan(xml_text: str) -> ScanResult:
-    # Krok 1: tekst → drzewo XML (tu łapiemy zły XML i ataki)
-    root = _parse_root(xml_text)
-    try:
-        # Krok 2: każdy <host> → HostResult
-        hosts = [_parse_host(host) for host in root.findall("host")]
-        # Krok 3: całość → ScanResult
-        return _build_scan_result(root, hosts)
-    except (ValidationError, ValueError) as error:
-        # Dane nie pasują do modeli (np. port="abc") albo zły timestamp.
-        # "from error" zachowuje oryginalny błąd w traceback — przydatne przy debugowaniu
-        raise NmapParseError(f"Unexpected nmap XML structure: {error}") from error
-
-
-# Tekst → korzeń drzewa XML. Wszystkie błędy zamienia na NmapParseError
-def _parse_root(xml_text: str) -> Element:
+    # ===== 1. TEKST → DRZEWO XML =====
     try:
         root = fromstring(xml_text)
     except DefusedXmlException as error:
@@ -43,98 +30,128 @@ def _parse_root(xml_text: str) -> Element:
     # Poprawny XML, ale nie z nmapa (np. inny dokument)
     if root.tag != "nmaprun":
         raise NmapParseError(f"Expected <nmaprun> root element, got <{root.tag}>")
-    return root
 
+    # Od tego miejsca błędy biorą się z DANYCH (np. portid="abc"):
+    # modele rzucą ValidationError, a int("abc") rzuci ValueError
+    try:
+        # ===== 2. HOSTY: każdy <host> → HostResult =====
+        hosts = []
+        for host in root.findall("host"):
 
-# Składa ScanResult z atrybutów <nmaprun> i <runstats> oraz listy hostów
-def _build_scan_result(root: Element, hosts: list[HostResult]) -> ScanResult:
-    hosts_up, hosts_down, hosts_total = _host_counts(root, hosts)
-    return ScanResult(
-        nmap_version=root.get("version"),                                  # <nmaprun version="7.95">
-        args=root.get("args"),                                             # <nmaprun args="nmap ...">
-        started_at=_timestamp(root.get("start")),                          # <nmaprun start="1792173600">
-        finished_at=_timestamp(_attr(root, "runstats/finished", "time")),  # None, gdy skan przerwany
-        elapsed_seconds=_attr(root, "runstats/finished", "elapsed"),       # "12.34" → Pydantic zrobi float
-        hosts_up=hosts_up,
-        hosts_down=hosts_down,
-        hosts_total=hosts_total,
-        hosts=hosts,
-    )
+            # --- Stan hosta z <status state="up"> ---
+            status = host.find("status")
+            # find() zwraca None, gdy elementu nie ma — wtedy stan też jest None
+            host_state = status.get("state") if status is not None else None
 
+            # --- Adresy: szukamy PO TYPIE (addrtype), a nie "pierwszego z brzegu" ---
+            ip = None
+            mac = None
+            mac_vendor = None
+            for address in host.findall("address"):
+                addrtype = address.get("addrtype")
+                if addrtype == "ipv4":
+                    # IPv4 ma pierwszeństwo — nadpisuje ewentualny wcześniejszy IPv6
+                    ip = address.get("addr")
+                elif addrtype == "ipv6" and ip is None:
+                    # IPv6 bierzemy tylko wtedy, gdy nie ma IPv4
+                    ip = address.get("addr")
+                elif addrtype == "mac":
+                    mac = address.get("addr")
+                    mac_vendor = address.get("vendor")    # vendor bywa pusty → None
 
-# Liczby hostów: z <runstats><hosts> albo, gdy go brak (przerwany skan), policzone z listy
-def _host_counts(root: Element, hosts: list[HostResult]) -> tuple:
-    counts = root.find("runstats/hosts")
-    if counts is not None:
-        # Wartości są tekstem ("2"); Pydantic zamieni je na int
-        return counts.get("up"), counts.get("down"), counts.get("total")
+            # --- Nazwy hosta z <hostnames><hostname name="..."> ---
+            hostnames = []
+            for hostname in host.findall("hostnames/hostname"):
+                name = hostname.get("name")
+                # Pomijamy puste nazwy i duplikaty; kolejność zostaje taka jak w XML
+                if name and name not in hostnames:
+                    hostnames.append(name)
 
-    # Brak <runstats>: liczymy sami z już sparsowanych hostów
-    hosts_up = sum(1 for host in hosts if host.state == "up")
-    return hosts_up, len(hosts) - hosts_up, len(hosts)
+            # --- Porty: każdy <port> → PortResult ---
+            # findall() zwraca pustą listę, gdy brak <ports> (host down) — pętla się nie wykona
+            ports = []
+            for port in host.findall("ports/port"):
+                port_state = port.find("state")
+                # Port bez <service> (np. 8080 z fixture) → service = None
+                service = port.find("service")
+                ports.append(
+                    PortResult(
+                        port=port.get("portid"),          # "22" → Pydantic zrobi int i sprawdzi zakres
+                        protocol=port.get("protocol"),
+                        state=port_state.get("state") if port_state is not None else None,
+                        reason=port_state.get("reason") if port_state is not None else None,
+                        service_name=service.get("name") if service is not None else None,
+                        product=service.get("product") if service is not None else None,
+                        version=service.get("version") if service is not None else None,
+                        # w XML "extrainfo", w modelu "extra_info"
+                        extra_info=service.get("extrainfo") if service is not None else None,
+                    )
+                )
 
+            # --- Zgrupowane porty: <extraports state="closed" count="997"> ---
+            extra_ports = []
+            for extra in host.findall("ports/extraports"):
+                extra_ports.append(ExtraPortsResult(state=extra.get("state"), count=extra.get("count")))
 
-# Jeden <host> → HostResult
-def _parse_host(host: Element) -> HostResult:
-    # Słownik {addrtype: element}, np. {"ipv4": <address>, "mac": <address>}.
-    # Szukamy adresu PO TYPIE, a nie "pierwszego z brzegu" (przypadek brzegowy z fixture)
-    addresses = {address.get("addrtype"): address for address in host.findall("address")}
+            hosts.append(
+                HostResult(
+                    state=host_state,
+                    ip=ip,
+                    mac=mac,
+                    mac_vendor=mac_vendor,
+                    hostnames=hostnames,
+                    ports=ports,
+                    extra_ports=extra_ports,
+                )
+            )
 
-    # IP: najpierw IPv4, a jeśli go nie ma — IPv6
-    ip_element = addresses.get("ipv4")
-    if ip_element is None:
-        ip_element = addresses.get("ipv6")
-    mac_element = addresses.get("mac")
+        # ===== 3. LICZBY HOSTÓW z <runstats><hosts up=".." down=".." total=".."> =====
+        counts = root.find("runstats/hosts")
+        if counts is not None:
+            # Wartości są tekstem ("2"); Pydantic zamieni je na int
+            hosts_up = counts.get("up")
+            hosts_down = counts.get("down")
+            hosts_total = counts.get("total")
+        else:
+            # Brak <runstats> (przerwany skan): liczymy sami z listy hostów
+            hosts_up = 0
+            for host_result in hosts:
+                if host_result.state == "up":
+                    hosts_up += 1
+            hosts_total = len(hosts)
+            hosts_down = hosts_total - hosts_up
 
-    return HostResult(
-        state=_attr(host, "status", "state"),                                    # <status state="up">
-        ip=ip_element.get("addr") if ip_element is not None else None,
-        mac=mac_element.get("addr") if mac_element is not None else None,
-        mac_vendor=mac_element.get("vendor") if mac_element is not None else None,  # vendor bywa pusty
-        hostnames=_parse_hostnames(host),
-        # findall zwraca [] gdy brak <ports> (host down) — bez sprawdzania None
-        ports=[_parse_port(port) for port in host.findall("ports/port")],
-        extra_ports=[_parse_extra_ports(extra) for extra in host.findall("ports/extraports")],
-    )
+        # ===== 4. CZASY: Unix timestamp (tekst) → datetime w UTC =====
+        started_at = None
+        start = root.get("start")                         # <nmaprun start="1792173600">
+        if start is not None:
+            # int("yesterday") rzuci ValueError → poniżej zamienimy go na NmapParseError
+            started_at = datetime.fromtimestamp(int(start), tz=timezone.utc)
 
+        # <runstats><finished time=".." elapsed=".."> — brak, gdy skan przerwany
+        finished = root.find("runstats/finished")
+        finished_at = None
+        elapsed_seconds = None
+        if finished is not None:
+            elapsed_seconds = finished.get("elapsed")     # "12.34" → Pydantic zrobi float
+            finished_time = finished.get("time")
+            if finished_time is not None:
+                finished_at = datetime.fromtimestamp(int(finished_time), tz=timezone.utc)
 
-# Jeden <port> → PortResult
-def _parse_port(port: Element) -> PortResult:
-    return PortResult(
-        port=port.get("portid"),                          # "22" → Pydantic zrobi int i sprawdzi zakres
-        protocol=port.get("protocol"),
-        state=_attr(port, "state", "state"),
-        reason=_attr(port, "state", "reason"),
-        # Brak <service> (port 8080 z fixture) → _attr zwróci None zamiast AttributeError
-        service_name=_attr(port, "service", "name"),
-        product=_attr(port, "service", "product"),
-        version=_attr(port, "service", "version"),
-        extra_info=_attr(port, "service", "extrainfo"),   # w XML "extrainfo", w modelu "extra_info"
-    )
+        # ===== 5. CAŁOŚĆ → ScanResult =====
+        return ScanResult(
+            nmap_version=root.get("version"),             # <nmaprun version="7.95">
+            args=root.get("args"),                        # <nmaprun args="nmap ...">
+            started_at=started_at,
+            finished_at=finished_at,
+            elapsed_seconds=elapsed_seconds,
+            hosts_up=hosts_up,
+            hosts_down=hosts_down,
+            hosts_total=hosts_total,
+            hosts=hosts,
+        )
 
-
-# Jeden <extraports> → ExtraPortsResult (np. 997 portów closed)
-def _parse_extra_ports(extra: Element) -> ExtraPortsResult:
-    return ExtraPortsResult(state=extra.get("state"), count=extra.get("count"))
-
-
-# <hostnames> → lista nazw bez pustych wartości i bez duplikatów
-def _parse_hostnames(host: Element) -> list[str]:
-    names = [hostname.get("name") for hostname in host.findall("hostnames/hostname")]
-    # dict.fromkeys usuwa duplikaty, ZACHOWUJĄC kolejność (set by ją pomieszał)
-    return list(dict.fromkeys(name for name in names if name))
-
-
-# Bezpieczne czytanie atrybutu dziecka: element.find(path).get(name),
-# ale zwraca None, gdy dziecka nie ma (zamiast wywracać się na None.get)
-def _attr(element: Element, path: str, name: str) -> str | None:
-    child = element.find(path)
-    return child.get(name) if child is not None else None
-
-
-# Unix timestamp jako tekst → datetime w UTC; None przechodzi dalej jako None
-def _timestamp(value: str | None) -> datetime | None:
-    if value is None:
-        return None
-    # int("abc") rzuci ValueError → parse_scan zamieni go na NmapParseError
-    return datetime.fromtimestamp(int(value), tz=timezone.utc)
+    except (ValidationError, ValueError) as error:
+        # Dane nie pasują do modeli albo zły timestamp.
+        # "from error" zachowuje oryginalny błąd w traceback — przydatne przy debugowaniu
+        raise NmapParseError(f"Unexpected nmap XML structure: {error}") from error
