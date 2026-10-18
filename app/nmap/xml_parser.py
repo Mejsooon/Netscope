@@ -11,7 +11,7 @@ from defusedxml.ElementTree import fromstring
 from pydantic import ValidationError
 
 from app.core.exceptions import NmapParseError
-from app.schemas.scan import HostResult, ScanResult
+from app.schemas.scan import HostResult, PortResult, ScanResult
 
 
 # JEDYNA publiczna funkcja modułu: tekst XML z nmapa → ScanResult albo NmapParseError
@@ -91,6 +91,23 @@ def _parse_host(host: Element) -> HostResult:
         mac=mac_element.get("addr") if mac_element is not None else None,
         mac_vendor=mac_element.get("vendor") if mac_element is not None else None,  # vendor bywa pusty
         hostnames=_parse_hostnames(host),
+        # findall zwraca [] gdy brak <ports> (host down) — bez sprawdzania None
+        ports=[_parse_port(port) for port in host.findall("ports/port")],
+    )
+
+
+# Jeden <port> → PortResult
+def _parse_port(port: Element) -> PortResult:
+    return PortResult(
+        port=port.get("portid"),                          # "22" → Pydantic zrobi int i sprawdzi zakres
+        protocol=port.get("protocol"),
+        state=_attr(port, "state", "state"),
+        reason=_attr(port, "state", "reason"),
+        # Brak <service> (port 8080 z fixture) → _attr zwróci None zamiast AttributeError
+        service_name=_attr(port, "service", "name"),
+        product=_attr(port, "service", "product"),
+        version=_attr(port, "service", "version"),
+        extra_info=_attr(port, "service", "extrainfo"),   # w XML "extrainfo", w modelu "extra_info"
     )
 
 

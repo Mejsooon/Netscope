@@ -130,3 +130,63 @@ def test_duplicate_hostnames_are_removed_keeping_order(typical_xml):
 
     # Duplikat usunięty, kolejność pierwszego wystąpienia zachowana
     assert parse_scan(xml_text).hosts[0].hostnames == ["gateway", "router.lan"]
+
+
+# ===== Porty i usługi =====
+
+# Pomocnik: {numer portu: PortResult}, żeby w testach pisać ports[22]
+def ports_by_number(host):
+    return {port.port: port for port in host.ports}
+
+
+def test_typical_ports_in_document_order(typical):
+    ports = typical.hosts[0].ports
+
+    # "22" z XML zamienione na int 22
+    assert [port.port for port in ports] == [22, 80, 443]
+    assert [port.state for port in ports] == ["open", "open", "closed"]
+    assert all(port.protocol == "tcp" for port in ports)
+
+
+def test_typical_service_details_from_version_detection(typical):
+    ssh = ports_by_number(typical.hosts[0])[22]
+
+    # Pełne dane z -sV (method="probed")
+    assert ssh.service_name == "ssh"
+    assert ssh.product == "OpenSSH"
+    assert ssh.version == "9.6p1 Ubuntu 3ubuntu13.5"
+    assert ssh.extra_info == "Ubuntu Linux; protocol 2.0"
+    assert ssh.reason == "syn-ack"
+
+
+def test_service_guessed_from_table_has_no_product(typical):
+    https = ports_by_number(typical.hosts[0])[443]
+
+    # method="table": tylko nazwa usługi, bez produktu i wersji
+    assert https.service_name == "https"
+    assert https.product is None
+    assert https.version is None
+
+
+def test_filtered_port(edge):
+    http = ports_by_number(edge.hosts[0])[80]
+
+    assert http.state == "filtered"
+    assert http.reason == "no-response"
+
+
+def test_port_without_service_element(edge):
+    unknown = ports_by_number(edge.hosts[0])[8080]
+
+    # Brak <service> nie wywraca parsera — pola usługi to None
+    assert unknown.state == "open"
+    assert unknown.service_name is None
+    assert unknown.product is None
+
+
+def test_hosts_without_port_elements_have_no_ports(edge):
+    _, down_host, filtered_host = edge.hosts
+
+    # Host down: brak <ports>; host 3: <ports> tylko z <extraports>
+    assert down_host.ports == []
+    assert filtered_host.ports == []
