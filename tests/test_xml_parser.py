@@ -8,21 +8,10 @@ from app.core.exceptions import NmapParseError
 from app.nmap.xml_parser import parse_scan
 
 
-# Fixture budujące gotowy ScanResult z plików XML z kroku 1.
-# Korzystają z fixture typical_xml / edge_cases_xml z conftest.py
-@pytest.fixture
-def typical(typical_xml):
-    return parse_scan(typical_xml)
-
-
-@pytest.fixture
-def edge(edge_cases_xml):
-    return parse_scan(edge_cases_xml)
-
-
 # ===== Metadane skanu i błędy na poziomie całego dokumentu =====
 
-def test_typical_scan_metadata(typical):
+def test_typical_scan_metadata(typical_xml):
+    typical = parse_scan(typical_xml)
     # Atrybuty <nmaprun>
     assert typical.nmap_version == "7.95"
     assert typical.args == "nmap -sT -sV -p 22,80,443 -oX - 192.168.1.1"
@@ -33,12 +22,14 @@ def test_typical_scan_metadata(typical):
     assert typical.elapsed_seconds == 12.34
 
 
-def test_typical_scan_host_counts(typical):
+def test_typical_scan_host_counts(typical_xml):
+    typical = parse_scan(typical_xml)
     # <hosts up="1" down="0" total="1"/>
     assert (typical.hosts_up, typical.hosts_down, typical.hosts_total) == (1, 0, 1)
 
 
-def test_edge_cases_host_counts(edge):
+def test_edge_cases_host_counts(edge_cases_xml):
+    edge = parse_scan(edge_cases_xml)
     # <hosts up="2" down="1" total="3"/>
     assert (edge.hosts_up, edge.hosts_down, edge.hosts_total) == (2, 1, 3)
 
@@ -66,7 +57,8 @@ def test_wrong_root_element_is_rejected():
 
 # ===== Hosty: stan i adresy =====
 
-def test_typical_host_status_and_address(typical):
+def test_typical_host_status_and_address(typical_xml):
+    typical = parse_scan(typical_xml)
     host = typical.hosts[0]
 
     assert len(typical.hosts) == 1
@@ -78,13 +70,15 @@ def test_typical_host_status_and_address(typical):
     assert host.mac_vendor is None
 
 
-def test_edge_cases_host_states_in_document_order(edge):
+def test_edge_cases_host_states_in_document_order(edge_cases_xml):
+    edge = parse_scan(edge_cases_xml)
     # Hosty w tej samej kolejności co w XML, łącznie z hostem down
     assert [host.state for host in edge.hosts] == ["up", "down", "up"]
     assert [str(host.ip) for host in edge.hosts] == ["192.168.1.1", "192.168.1.2", "192.168.1.3"]
 
 
-def test_edge_cases_ipv4_and_mac_are_separated(edge):
+def test_edge_cases_ipv4_and_mac_are_separated(edge_cases_xml):
+    edge = parse_scan(edge_cases_xml)
     first, _, third = edge.hosts
 
     # MAC trafia do pola mac, a nie do ip (szukanie po addrtype)
@@ -106,12 +100,15 @@ def test_ipv6_host_address(typical_xml):
 
 # ===== Nazwy hostów =====
 
-def test_hostnames_are_collected(typical, edge):
+def test_hostnames_are_collected(typical_xml, edge_cases_xml):
+    typical = parse_scan(typical_xml)
+    edge = parse_scan(edge_cases_xml)
     assert typical.hosts[0].hostnames == ["router.lan"]
     assert edge.hosts[0].hostnames == ["router.lan"]
 
 
-def test_missing_or_empty_hostnames_give_empty_list(edge):
+def test_missing_or_empty_hostnames_give_empty_list(edge_cases_xml):
+    edge = parse_scan(edge_cases_xml)
     _, down_host, empty_hostnames_host = edge.hosts
 
     # Host down nie ma <hostnames>; host 3 ma pusty <hostnames></hostnames>
@@ -134,12 +131,8 @@ def test_duplicate_hostnames_are_removed_keeping_order(typical_xml):
 
 # ===== Porty i usługi =====
 
-# Pomocnik: {numer portu: PortResult}, żeby w testach pisać ports[22]
-def ports_by_number(host):
-    return {port.port: port for port in host.ports}
-
-
-def test_typical_ports_in_document_order(typical):
+def test_typical_ports_in_document_order(typical_xml):
+    typical = parse_scan(typical_xml)
     ports = typical.hosts[0].ports
 
     # "22" z XML zamienione na int 22
@@ -148,8 +141,10 @@ def test_typical_ports_in_document_order(typical):
     assert all(port.protocol == "tcp" for port in ports)
 
 
-def test_typical_service_details_from_version_detection(typical):
-    ssh = ports_by_number(typical.hosts[0])[22]
+def test_typical_service_details_from_version_detection(typical_xml):
+    typical = parse_scan(typical_xml)
+    # Porty w kolejności z XML: [0]=22, [1]=80, [2]=443
+    ssh = typical.hosts[0].ports[0]
 
     # Pełne dane z -sV (method="probed")
     assert ssh.service_name == "ssh"
@@ -159,8 +154,10 @@ def test_typical_service_details_from_version_detection(typical):
     assert ssh.reason == "syn-ack"
 
 
-def test_service_guessed_from_table_has_no_product(typical):
-    https = ports_by_number(typical.hosts[0])[443]
+def test_service_guessed_from_table_has_no_product(typical_xml):
+    typical = parse_scan(typical_xml)
+    # Porty w kolejności z XML: [0]=22, [1]=80, [2]=443
+    https = typical.hosts[0].ports[2]
 
     # method="table": tylko nazwa usługi, bez produktu i wersji
     assert https.service_name == "https"
@@ -168,15 +165,19 @@ def test_service_guessed_from_table_has_no_product(typical):
     assert https.version is None
 
 
-def test_filtered_port(edge):
-    http = ports_by_number(edge.hosts[0])[80]
+def test_filtered_port(edge_cases_xml):
+    edge = parse_scan(edge_cases_xml)
+    # Porty hosta 1 w kolejności z XML: [0]=22, [1]=53, [2]=80, [3]=8080
+    http = edge.hosts[0].ports[2]
 
     assert http.state == "filtered"
     assert http.reason == "no-response"
 
 
-def test_port_without_service_element(edge):
-    unknown = ports_by_number(edge.hosts[0])[8080]
+def test_port_without_service_element(edge_cases_xml):
+    edge = parse_scan(edge_cases_xml)
+    # Porty hosta 1 w kolejności z XML: [0]=22, [1]=53, [2]=80, [3]=8080
+    unknown = edge.hosts[0].ports[3]
 
     # Brak <service> nie wywraca parsera — pola usługi to None
     assert unknown.state == "open"
@@ -184,7 +185,8 @@ def test_port_without_service_element(edge):
     assert unknown.product is None
 
 
-def test_hosts_without_port_elements_have_no_ports(edge):
+def test_hosts_without_port_elements_have_no_ports(edge_cases_xml):
+    edge = parse_scan(edge_cases_xml)
     _, down_host, filtered_host = edge.hosts
 
     # Host down: brak <ports>; host 3: <ports> tylko z <extraports>
@@ -194,7 +196,8 @@ def test_hosts_without_port_elements_have_no_ports(edge):
 
 # ===== Zgrupowane porty (extraports) =====
 
-def test_extraports_summaries(edge):
+def test_extraports_summaries(edge_cases_xml):
+    edge = parse_scan(edge_cases_xml)
     first, down_host, filtered_host = edge.hosts
 
     # Lista par (stan, liczba) dla każdego hosta
@@ -203,7 +206,8 @@ def test_extraports_summaries(edge):
     assert [(e.state, e.count) for e in filtered_host.extra_ports] == [("filtered", 1001)]
 
 
-def test_extraports_are_not_listed_as_ports(edge):
+def test_extraports_are_not_listed_as_ports(edge_cases_xml):
+    edge = parse_scan(edge_cases_xml)
     first = edge.hosts[0]
 
     # 4 porty wypisane osobno + 997 zgrupowanych = 1001 skanowanych portów
