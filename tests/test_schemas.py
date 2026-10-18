@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.scan import PortResult
+from app.schemas.scan import ExtraPortsResult, HostResult, PortResult
 
 
 # Pomocnik: poprawny port z minimalnymi danymi; overrides podmienia wybrane pola,
@@ -51,3 +51,58 @@ def test_port_result_is_frozen():
     # frozen=True: zmiana pola po utworzeniu obiektu to błąd
     with pytest.raises(ValidationError):
         port.port = 80
+
+
+def test_host_result_defaults_to_empty_collections():
+    # Host down z fixture: znamy tylko stan, reszta ma rozsądne wartości domyślne
+    host = HostResult(state="down")
+
+    assert host.ip is None
+    assert host.hostnames == []
+    assert host.ports == []
+    assert host.extra_ports == []
+
+
+def test_host_results_do_not_share_lists():
+    # default_factory=list: każdy host ma WŁASNĄ listę, a nie jedną wspólną
+    first = HostResult(state="up")
+    second = HostResult(state="up")
+
+    assert first.ports is not second.ports
+
+
+# Pydantic przyjmuje IPv4 i IPv6
+@pytest.mark.parametrize("ip", ["192.168.1.1", "2001:db8::1"])
+def test_host_result_accepts_ipv4_and_ipv6(ip):
+    assert str(HostResult(state="up", ip=ip).ip) == ip
+
+
+# Zły adres, nazwa hosta zamiast IP, sieć CIDR zamiast pojedynczego adresu → błąd
+@pytest.mark.parametrize("ip", ["999.1.1.1", "router.lan", "192.168.1.0/24"])
+def test_host_result_rejects_invalid_ip(ip):
+    with pytest.raises(ValidationError):
+        HostResult(state="up", ip=ip)
+
+
+# Za krótki MAC, myślniki zamiast dwukropków, znak spoza 0-9/A-F → błąd
+@pytest.mark.parametrize("mac", ["AA:BB:CC:11:22", "AA-BB-CC-11-22-33", "GG:BB:CC:11:22:33"])
+def test_host_result_rejects_invalid_mac(mac):
+    with pytest.raises(ValidationError):
+        HostResult(state="up", mac=mac)
+
+
+def test_extra_ports_rejects_negative_count():
+    with pytest.raises(ValidationError):
+        ExtraPortsResult(state="closed", count=-1)
+
+
+def test_host_result_nests_ports():
+    # Modele zagnieżdżają się: host zawiera listy PortResult i ExtraPortsResult
+    host = HostResult(
+        state="up",
+        ports=[make_port()],
+        extra_ports=[ExtraPortsResult(state="closed", count=997)],
+    )
+
+    assert host.ports[0].port == 22
+    assert host.extra_ports[0].count == 997
