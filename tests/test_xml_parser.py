@@ -102,3 +102,31 @@ def test_ipv6_host_address(typical_xml):
     )
 
     assert str(parse_scan(xml_text).hosts[0].ip) == "2001:db8::1"
+
+
+# ===== Nazwy hostów =====
+
+def test_hostnames_are_collected(typical, edge):
+    assert typical.hosts[0].hostnames == ["router.lan"]
+    assert edge.hosts[0].hostnames == ["router.lan"]
+
+
+def test_missing_or_empty_hostnames_give_empty_list(edge):
+    _, down_host, empty_hostnames_host = edge.hosts
+
+    # Host down nie ma <hostnames>; host 3 ma pusty <hostnames></hostnames>
+    assert down_host.hostnames == []
+    assert empty_hostnames_host.hostnames == []
+
+
+def test_duplicate_hostnames_are_removed_keeping_order(typical_xml):
+    # Trzy nazwy, w tym duplikat "gateway"
+    xml_text = typical_xml.replace(
+        '<hostname name="router.lan" type="PTR"/>',
+        '<hostname name="gateway" type="user"/>'
+        '<hostname name="router.lan" type="PTR"/>'
+        '<hostname name="gateway" type="PTR"/>',
+    )
+
+    # Duplikat usunięty, kolejność pierwszego wystąpienia zachowana
+    assert parse_scan(xml_text).hosts[0].hostnames == ["gateway", "router.lan"]

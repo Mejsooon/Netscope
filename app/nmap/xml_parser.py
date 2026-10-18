@@ -90,7 +90,15 @@ def _parse_host(host: Element) -> HostResult:
         ip=ip_element.get("addr") if ip_element is not None else None,
         mac=mac_element.get("addr") if mac_element is not None else None,
         mac_vendor=mac_element.get("vendor") if mac_element is not None else None,  # vendor bywa pusty
+        hostnames=_parse_hostnames(host),
     )
+
+
+# <hostnames> → lista nazw bez pustych wartości i bez duplikatów
+def _parse_hostnames(host: Element) -> list[str]:
+    names = [hostname.get("name") for hostname in host.findall("hostnames/hostname")]
+    # dict.fromkeys usuwa duplikaty, ZACHOWUJĄC kolejność (set by ją pomieszał)
+    return list(dict.fromkeys(name for name in names if name))
 
 
 # Bezpieczne czytanie atrybutu dziecka: element.find(path).get(name),
