@@ -62,15 +62,16 @@ def _build_scan_result(root: Element, hosts: list[HostResult]) -> ScanResult:
     )
 
 
-# Liczby hostów z <runstats><hosts up=".." down=".." total="..">
+# Liczby hostów: z <runstats><hosts> albo, gdy go brak (przerwany skan), policzone z listy
 def _host_counts(root: Element, hosts: list[HostResult]) -> tuple:
-    # Wartości są tekstem ("2"); Pydantic zamieni je na int.
-    # Brak <runstats> da None → ValidationError (obsłużymy to w osobnym commicie)
-    return (
-        _attr(root, "runstats/hosts", "up"),
-        _attr(root, "runstats/hosts", "down"),
-        _attr(root, "runstats/hosts", "total"),
-    )
+    counts = root.find("runstats/hosts")
+    if counts is not None:
+        # Wartości są tekstem ("2"); Pydantic zamieni je na int
+        return counts.get("up"), counts.get("down"), counts.get("total")
+
+    # Brak <runstats>: liczymy sami z już sparsowanych hostów
+    hosts_up = sum(1 for host in hosts if host.state == "up")
+    return hosts_up, len(hosts) - hosts_up, len(hosts)
 
 
 # Jeden <host> → HostResult

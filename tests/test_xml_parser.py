@@ -209,3 +209,32 @@ def test_extraports_are_not_listed_as_ports(edge):
     # 4 porty wypisane osobno + 997 zgrupowanych = 1001 skanowanych portów
     assert len(first.ports) == 4
     assert len(first.ports) + first.extra_ports[0].count == 1001
+
+
+# ===== Skan bez <runstats> =====
+
+# Przerwany skan: nmap nie zdążył zapisać <runstats>
+INTERRUPTED_SCAN = """<nmaprun scanner="nmap" args="nmap -sT 10.0.0.0/30" start="1792173600" version="7.95">
+<host><status state="up"/><address addr="10.0.0.1" addrtype="ipv4"/></host>
+<host><status state="down"/><address addr="10.0.0.2" addrtype="ipv4"/></host>
+</nmaprun>"""
+
+
+def test_interrupted_scan_without_runstats_counts_hosts():
+    scan = parse_scan(INTERRUPTED_SCAN)
+
+    # Liczby policzone z listy hostów: 1 up, 1 down, 2 łącznie
+    assert (scan.hosts_up, scan.hosts_down, scan.hosts_total) == (1, 1, 2)
+    assert scan.finished_at is None
+    assert scan.elapsed_seconds is None
+
+
+def test_runstats_take_priority_over_listed_hosts(edge_cases_xml):
+    # Skan sieci /24: nmap wypisuje tylko część hostów, ale <runstats> zna pełne liczby
+    xml_text = edge_cases_xml.replace(
+        '<hosts up="2" down="1" total="3"/>', '<hosts up="2" down="254" total="256"/>'
+    )
+    scan = parse_scan(xml_text)
+
+    assert len(scan.hosts) == 3
+    assert (scan.hosts_up, scan.hosts_down, scan.hosts_total) == (2, 254, 256)
