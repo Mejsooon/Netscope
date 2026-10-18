@@ -11,7 +11,7 @@ from defusedxml.ElementTree import fromstring
 from pydantic import ValidationError
 
 from app.core.exceptions import NmapParseError
-from app.schemas.scan import HostResult, PortResult, ScanResult
+from app.schemas.scan import ExtraPortsResult, HostResult, PortResult, ScanResult
 
 
 # JEDYNA publiczna funkcja modułu: tekst XML z nmapa → ScanResult albo NmapParseError
@@ -93,6 +93,7 @@ def _parse_host(host: Element) -> HostResult:
         hostnames=_parse_hostnames(host),
         # findall zwraca [] gdy brak <ports> (host down) — bez sprawdzania None
         ports=[_parse_port(port) for port in host.findall("ports/port")],
+        extra_ports=[_parse_extra_ports(extra) for extra in host.findall("ports/extraports")],
     )
 
 
@@ -109,6 +110,11 @@ def _parse_port(port: Element) -> PortResult:
         version=_attr(port, "service", "version"),
         extra_info=_attr(port, "service", "extrainfo"),   # w XML "extrainfo", w modelu "extra_info"
     )
+
+
+# Jeden <extraports> → ExtraPortsResult (np. 997 portów closed)
+def _parse_extra_ports(extra: Element) -> ExtraPortsResult:
+    return ExtraPortsResult(state=extra.get("state"), count=extra.get("count"))
 
 
 # <hostnames> → lista nazw bez pustych wartości i bez duplikatów

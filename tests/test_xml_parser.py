@@ -190,3 +190,22 @@ def test_hosts_without_port_elements_have_no_ports(edge):
     # Host down: brak <ports>; host 3: <ports> tylko z <extraports>
     assert down_host.ports == []
     assert filtered_host.ports == []
+
+
+# ===== Zgrupowane porty (extraports) =====
+
+def test_extraports_summaries(edge):
+    first, down_host, filtered_host = edge.hosts
+
+    # Lista par (stan, liczba) dla każdego hosta
+    assert [(e.state, e.count) for e in first.extra_ports] == [("closed", 997)]
+    assert down_host.extra_ports == []
+    assert [(e.state, e.count) for e in filtered_host.extra_ports] == [("filtered", 1001)]
+
+
+def test_extraports_are_not_listed_as_ports(edge):
+    first = edge.hosts[0]
+
+    # 4 porty wypisane osobno + 997 zgrupowanych = 1001 skanowanych portów
+    assert len(first.ports) == 4
+    assert len(first.ports) + first.extra_ports[0].count == 1001
