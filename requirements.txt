@@ -1,0 +1,6 @@
+# Bezpieczne parsowanie XML (ochrona przed XXE i "billion laughs")
+defusedxml>=0.7.1
+# Modele danych z walidacją (ScanResult, HostResult...)
+pydantic>=2.0
+# Framework testowy
+pytest>=8.0
