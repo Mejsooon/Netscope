@@ -11,7 +11,7 @@ from defusedxml.ElementTree import fromstring
 from pydantic import ValidationError
 
 from app.core.exceptions import NmapParseError
-from app.schemas.scan import ScanResult
+from app.schemas.scan import HostResult, ScanResult
 
 
 # JEDYNA publiczna funkcja modułu: tekst XML z nmapa → ScanResult albo NmapParseError
@@ -19,8 +19,10 @@ def parse_scan(xml_text: str) -> ScanResult:
     # Krok 1: tekst → drzewo XML (tu łapiemy zły XML i ataki)
     root = _parse_root(xml_text)
     try:
-        # Krok 2: atrybuty <nmaprun> i <runstats> → ScanResult
-        return _build_scan_result(root)
+        # Krok 2: każdy <host> → HostResult
+        hosts = [_parse_host(host) for host in root.findall("host")]
+        # Krok 3: całość → ScanResult
+        return _build_scan_result(root, hosts)
     except (ValidationError, ValueError) as error:
         # Dane nie pasują do modeli (np. port="abc") albo zły timestamp.
         # "from error" zachowuje oryginalny błąd w traceback — przydatne przy debugowaniu
@@ -44,9 +46,9 @@ def _parse_root(xml_text: str) -> Element:
     return root
 
 
-# Składa ScanResult z atrybutów <nmaprun> i <runstats>
-def _build_scan_result(root: Element) -> ScanResult:
-    hosts_up, hosts_down, hosts_total = _host_counts(root)
+# Składa ScanResult z atrybutów <nmaprun> i <runstats> oraz listy hostów
+def _build_scan_result(root: Element, hosts: list[HostResult]) -> ScanResult:
+    hosts_up, hosts_down, hosts_total = _host_counts(root, hosts)
     return ScanResult(
         nmap_version=root.get("version"),                                  # <nmaprun version="7.95">
         args=root.get("args"),                                             # <nmaprun args="nmap ...">
@@ -56,17 +58,38 @@ def _build_scan_result(root: Element) -> ScanResult:
         hosts_up=hosts_up,
         hosts_down=hosts_down,
         hosts_total=hosts_total,
+        hosts=hosts,
     )
 
 
 # Liczby hostów z <runstats><hosts up=".." down=".." total="..">
-def _host_counts(root: Element) -> tuple:
+def _host_counts(root: Element, hosts: list[HostResult]) -> tuple:
     # Wartości są tekstem ("2"); Pydantic zamieni je na int.
     # Brak <runstats> da None → ValidationError (obsłużymy to w osobnym commicie)
     return (
         _attr(root, "runstats/hosts", "up"),
         _attr(root, "runstats/hosts", "down"),
         _attr(root, "runstats/hosts", "total"),
+    )
+
+
+# Jeden <host> → HostResult
+def _parse_host(host: Element) -> HostResult:
+    # Słownik {addrtype: element}, np. {"ipv4": <address>, "mac": <address>}.
+    # Szukamy adresu PO TYPIE, a nie "pierwszego z brzegu" (przypadek brzegowy z fixture)
+    addresses = {address.get("addrtype"): address for address in host.findall("address")}
+
+    # IP: najpierw IPv4, a jeśli go nie ma — IPv6
+    ip_element = addresses.get("ipv4")
+    if ip_element is None:
+        ip_element = addresses.get("ipv6")
+    mac_element = addresses.get("mac")
+
+    return HostResult(
+        state=_attr(host, "status", "state"),                                    # <status state="up">
+        ip=ip_element.get("addr") if ip_element is not None else None,
+        mac=mac_element.get("addr") if mac_element is not None else None,
+        mac_vendor=mac_element.get("vendor") if mac_element is not None else None,  # vendor bywa pusty
     )
 
 

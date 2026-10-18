@@ -62,3 +62,43 @@ def test_wrong_root_element_is_rejected():
     # Poprawny XML, ale to nie jest wynik nmapa
     with pytest.raises(NmapParseError, match="Expected <nmaprun>"):
         parse_scan("<html><body>not nmap</body></html>")
+
+
+# ===== Hosty: stan i adresy =====
+
+def test_typical_host_status_and_address(typical):
+    host = typical.hosts[0]
+
+    assert len(typical.hosts) == 1
+    assert host.state == "up"
+    # IPvAnyAddress → str() daje adres jako tekst
+    assert str(host.ip) == "192.168.1.1"
+    # Typowy skan nie ma adresu MAC
+    assert host.mac is None
+    assert host.mac_vendor is None
+
+
+def test_edge_cases_host_states_in_document_order(edge):
+    # Hosty w tej samej kolejności co w XML, łącznie z hostem down
+    assert [host.state for host in edge.hosts] == ["up", "down", "up"]
+    assert [str(host.ip) for host in edge.hosts] == ["192.168.1.1", "192.168.1.2", "192.168.1.3"]
+
+
+def test_edge_cases_ipv4_and_mac_are_separated(edge):
+    first, _, third = edge.hosts
+
+    # MAC trafia do pola mac, a nie do ip (szukanie po addrtype)
+    assert first.mac == "AA:BB:CC:11:22:33"
+    assert first.mac_vendor == "Example Networks"
+    # Host 3: MAC bez atrybutu vendor
+    assert third.mac == "AA:BB:CC:44:55:66"
+    assert third.mac_vendor is None
+
+
+def test_ipv6_host_address(typical_xml):
+    # Podmieniamy adres IPv4 na IPv6 w kopii fixture
+    xml_text = typical_xml.replace(
+        'addr="192.168.1.1" addrtype="ipv4"', 'addr="2001:db8::1" addrtype="ipv6"'
+    )
+
+    assert str(parse_scan(xml_text).hosts[0].ip) == "2001:db8::1"
