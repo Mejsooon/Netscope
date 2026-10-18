@@ -7,11 +7,11 @@ Lokalna aplikacja (FastAPI + przeglądarka), która dodaje interaktywne GUI do n
 
 ## Status
 
-Krok 1 z 8 — struktura projektu i dane testowe dla parsera XML.
+Krok 1 z 8 gotowy — parser XML z modelami danych i testami.
 
 | Krok | Moduł | Status |
 |---|---|---|
-| 1 | Parser XML | w trakcie |
+| 1 | Parser XML | gotowe |
 | 2 | Builder (allowlista + walidacja) | — |
 | 3 | Runner (subprocess) | — |
 | 4 | API | — |
@@ -19,6 +19,20 @@ Krok 1 z 8 — struktura projektu i dane testowe dla parsera XML.
 | 6 | Reguły ostrzeżeń | — |
 | 7 | AI | — |
 | 8 | Desktop | — |
+
+## Parser XML
+
+`parse_scan()` zamienia wynik nmapa w formacie XML (`nmap -oX -`) na obiekt `ScanResult`:
+
+```python
+from app.nmap.xml_parser import parse_scan
+
+scan = parse_scan(xml_text)
+for host in scan.hosts:
+    print(host.ip, host.state, [port.port for port in host.ports])
+```
+
+Każdy błąd — uszkodzony XML, złośliwe encje (XXE, billion laughs) albo dane, które nie pasują do modeli — kończy się wyjątkiem `NmapParseError`. XML jest czytany przez `defusedxml`.
 
 ## Uruchomienie testów
 
