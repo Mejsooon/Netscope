@@ -242,3 +242,58 @@ def test_runstats_take_priority_over_listed_hosts(edge_cases_xml):
 
     assert len(scan.hosts) == 3
     assert (scan.hosts_up, scan.hosts_down, scan.hosts_total) == (2, 254, 256)
+
+
+# ===== Zepsute dane: poprawny XML, ale wartości nie pasują do modeli =====
+
+# Minimalny poprawny wynik nmapa: 1 host z 1 portem.
+# Każdy test poniżej psuje w nim jedną rzecz przez .replace(stary_tekst, nowy_tekst)
+MINIMAL_SCAN = """<nmaprun args="nmap" start="1792173600" version="7.95">
+<host><status state="up"/><address addr="10.0.0.1" addrtype="ipv4"/>
+<ports><port protocol="tcp" portid="22"><state state="open"/></port></ports></host>
+<runstats><hosts up="1" down="0" total="1"/></runstats>
+</nmaprun>"""
+
+
+def test_minimal_scan_is_valid():
+    # Najpierw sprawdzamy, że NIEZEPSUTA wersja przechodzi —
+    # inaczej testy poniżej mogłyby przechodzić z zupełnie innego powodu
+    scan = parse_scan(MINIMAL_SCAN)
+
+    assert scan.hosts[0].ports[0].port == 22
+
+
+# Każda para (stary, nowy) psuje jedną wartość; ids= to nazwy przypadków w pytest -v
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        ('portid="22"', ""),                                  # brak numeru portu
+        ('portid="22"', 'portid="70000"'),                    # port poza zakresem 1–65535
+        ('portid="22"', 'portid="ssh"'),                      # nazwa zamiast numeru
+        ('<state state="open"/>', '<state state="weird"/>'),  # nieznany stan portu
+        ('<state state="open"/>', ""),                        # port bez <state>
+        ('protocol="tcp"', 'protocol="icmp"'),                # nieznany protokół
+        ('<status state="up"/>', ""),                         # host bez <status>
+        ('addr="10.0.0.1"', 'addr="999.0.0.1"'),              # niepoprawny adres IP
+        ('version="7.95"', ""),                               # brak wersji nmapa
+        ('start="1792173600"', 'start="yesterday"'),          # timestamp, który nie jest liczbą
+    ],
+    ids=[
+        "port-missing-portid",
+        "port-out-of-range",
+        "port-not-a-number",
+        "port-unknown-state",
+        "port-missing-state",
+        "port-unknown-protocol",
+        "host-missing-status",
+        "host-invalid-ip",
+        "scan-missing-version",
+        "scan-start-not-a-number",
+    ],
+)
+def test_malformed_data_is_rejected(old, new):
+    broken_xml = MINIMAL_SCAN.replace(old, new)
+
+    # Każde zepsucie kończy się NASZYM wyjątkiem z komunikatem o strukturze danych
+    with pytest.raises(NmapParseError, match="Unexpected nmap XML structure"):
+        parse_scan(broken_xml)
