@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?> <!-- Deklaracja XML: wersja 1.0, kodowanie UTF-8. Musi być pierwszą linią pliku -->
+<!DOCTYPE nmaprun> <!-- Deklaracja typu dokumentu, jak w prawdziwym wyjściu nmapa -->
+<?xml-stylesheet href="file:///usr/share/nmap/nmap.xsl" type="text/xsl"?> <!-- Arkusz XSL do podglądu w przeglądarce. Parser go ignoruje -->
+
+<!-- Korzeń dokumentu. Polecenie:
+     -v                = tryb gadatliwy, dodaje elementy taskbegin / taskend
+     -sS               = skan SYN (półotwarty, wymaga roota)
+     -sV               = wykrywanie wersji usług
+     -p 1-1000,8080    = zakres portów 1 do 1000 plus port 8080
+     -oX -             = wynik XML na standardowe wyjście
+     192.168.1.1-3     = trzy cele: .1, .2 i .3 -->
+<nmaprun scanner="nmap" args="nmap -v -sS -sV -p 1-1000,8080 -oX - 192.168.1.1-3" start="1792174200" startstr="Fri Oct 16 20:10:00 2026" version="7.95" xmloutputversion="1.05">
+
+    <!-- Typ skanu: syn, protokół TCP, 1001 portów (1000 + 8080) i ich lista -->
+    <scaninfo type="syn" protocol="tcp" numservices="1001" services="1-1000,8080"/>
+
+    <verbose level="1"/>   <!-- Poziom szczegółowości 1 (jedno -v) -->
+    <debugging level="0"/> <!-- Debugowanie wyłączone -->
+
+    <!-- PRZYPADEK BRZEGOWY: elementy dodawane przez -v. Parser nie zna ich znaczenia i musi je po prostu pominąć -->
+    <taskbegin task="ARP Ping Scan" time="1792174200"/>                           <!-- Start fazy wykrywania hostów przez ARP -->
+    <taskend task="ARP Ping Scan" time="1792174201" extrainfo="3 total hosts"/>   <!-- Koniec tej fazy: znaleziono 3 hosty do sprawdzenia -->
+
+    <!-- ===== HOST 1: 192.168.1.1, aktywny, z wieloma przypadkami brzegowymi ===== -->
+    <host starttime="1792174201" endtime="1792174230">
+
+        <!-- Stan: up. Powód: odpowiedź ARP (host w tej samej sieci lokalnej) -->
+        <status state="up" reason="arp-response" reason_ttl="0"/>
+
+        <!-- PRZYPADEK BRZEGOWY: dwa adresy. Parser nie może brać „pierwszego lepszego” <address>,
+             tylko szukać po addrtype, bo inaczej może wziąć MAC zamiast IP -->
+        <address addr="192.168.1.1" addrtype="ipv4"/>                                   <!-- Adres IPv4 -->
+        <address addr="AA:BB:CC:11:22:33" addrtype="mac" vendor="Example Networks"/>    <!-- Adres MAC i producent karty sieciowej (vendor, opcjonalny) -->
+
+        <hostnames> <!-- Lista nazw hosta -->
+            <hostname name="router.lan" type="PTR"/> <!-- Nazwa z odwrotnego DNS -->
+        </hostnames> <!-- Koniec listy nazw -->
+
+        <ports> <!-- Lista portów hosta 1 -->
+
+            <!-- PRZYPADEK BRZEGOWY: extraports. 997 zamkniętych portów jest zgrupowanych w JEDNYM elemencie
+                 zamiast 997 osobnych <port>. Parser musi zapisać to jako podsumowanie, a nie jako port -->
+            <extraports state="closed" count="997">
+                <!-- Szczegóły grupy: powód reset (host odesłał RST), liczba, protokół i dokładne zakresy portów -->
+                <extrareasons reason="reset" count="997" proto="tcp" ports="1-21,23-52,54-79,81-1000"/>
+            </extraports> <!-- Koniec grupy -->
+
+            <!-- Port 22 TCP -->
+            <port protocol="tcp" portid="22">
+                <state state="open" reason="syn-ack" reason_ttl="64"/> <!-- Stan: open, TTL 64 (typowy dla Linuksa) -->
+                <!-- PRZYPADEK BRZEGOWY: usługa bez product i version (tylko zgadnięta z tabeli, conf="3") -->
+                <service name="ssh" method="table" conf="3"/>
+            </port> <!-- Koniec portu 22 -->
+
+            <!-- Port 53 TCP: przypadek „normalny” dla porównania -->
+            <port protocol="tcp" portid="53">
+                <state state="open" reason="syn-ack" reason_ttl="64"/> <!-- Stan: open -->
+                <!-- Usługa DNS: dnsmasq 2.90, rozpoznana sondami z pełną pewnością -->
+                <service name="domain" product="dnsmasq" version="2.90" method="probed" conf="10">
+                    <cpe>cpe:/a:thekelleys:dnsmasq:2.90</cpe> <!-- Identyfikator CPE dnsmasq -->
+                </service> <!-- Koniec opisu usługi -->
+            </port> <!-- Koniec portu 53 -->
+
+            <!-- Port 80 TCP -->
+            <port protocol="tcp" portid="80">
+                <!-- PRZYPADEK BRZEGOWY: stan filtered. Brak odpowiedzi, prawdopodobnie firewall.
+                     Trzeci stan obok open i closed, który parser i frontend muszą obsłużyć -->
+                <state state="filtered" reason="no-response" reason_ttl="0"/>
+                <service name="http" method="table" conf="3"/> <!-- Usługa tylko zgadnięta z numeru portu -->
+            </port> <!-- Koniec portu 80 -->
+
+            <!-- Port 8080 TCP -->
+            <port protocol="tcp" portid="8080">
+                <state state="open" reason="syn-ack" reason_ttl="64"/> <!-- Stan: open -->
+                <!-- PRZYPADEK BRZEGOWY: brak elementu <service>. port.find("service") zwróci None,
+                     więc kod typu port.find("service").get("name") wywróciłby się z AttributeError -->
+            </port> <!-- Koniec portu 8080 -->
+
+        </ports> <!-- Koniec listy portów hosta 1 -->
+
+        <times srtt="1280" rttvar="640" to="100000"/> <!-- Czasy odpowiedzi w mikrosekundach -->
+
+    </host> <!-- Koniec hosta 1 -->
+
+    <!-- ===== HOST 2: 192.168.1.2, nieaktywny ===== -->
+    <!-- PRZYPADEK BRZEGOWY: host down nie ma starttime, endtime, <hostnames>, <ports> ani <times>.
+         host.find("ports") zwróci None, a parser musi z tego zrobić pustą listę portów -->
+    <host>
+        <status state="down" reason="no-response" reason_ttl="0"/> <!-- Stan: down, brak odpowiedzi -->
+        <address addr="192.168.1.2" addrtype="ipv4"/>              <!-- Jedyna znana informacja: adres -->
+    </host> <!-- Koniec hosta 2 -->
+
+    <!-- ===== HOST 3: 192.168.1.3, aktywny, ale wszystkie porty filtrowane ===== -->
+    <host starttime="1792174201" endtime="1792174260">
+
+        <status state="up" reason="arp-response" reason_ttl="0"/> <!-- Stan: up (odpowiedział na ARP) -->
+
+        <address addr="192.168.1.3" addrtype="ipv4"/>       <!-- Adres IPv4 -->
+        <address addr="AA:BB:CC:44:55:66" addrtype="mac"/>  <!-- PRZYPADEK BRZEGOWY: MAC bez atrybutu vendor -->
+
+        <!-- PRZYPADEK BRZEGOWY: pusta lista nazw. Element istnieje, ale nie ma w nim żadnego <hostname> -->
+        <hostnames>
+        </hostnames>
+
+        <!-- PRZYPADEK BRZEGOWY: sekcja <ports> istnieje, ale nie ma ani jednego <port>.
+             Wynikiem ma być pusta lista portów plus podsumowanie extraports -->
+        <ports>
+            <!-- Wszystkie 1001 porty filtrowane (firewall nie odpowiada na nic) -->
+            <extraports state="filtered" count="1001">
+                <extrareasons reason="no-response" count="1001" proto="tcp" ports="1-1000,8080"/> <!-- Powód: brak odpowiedzi na wszystkich portach -->
+            </extraports> <!-- Koniec grupy -->
+        </ports> <!-- Koniec listy portów hosta 3 -->
+
+        <times srtt="2048" rttvar="1024" to="100000"/> <!-- Czasy odpowiedzi w mikrosekundach -->
+
+    </host> <!-- Koniec hosta 3 -->
+
+    <!-- Statystyki całego skanu -->
+    <runstats>
+        <!-- Zakończenie: czas, podsumowanie (3 adresy, 2 aktywne), czas trwania 60.12 s, exit = success -->
+        <finished time="1792174260" timestr="Fri Oct 16 20:11:00 2026" summary="Nmap done at Fri Oct 16 20:11:00 2026; 3 IP addresses (2 hosts up) scanned in 60.12 seconds" elapsed="60.12" exit="success"/>
+        <!-- Liczba hostów: 2 aktywne, 1 nieaktywny, 3 łącznie. Test sprawdza, że zgadza się z liczbą elementów <host> -->
+        <hosts up="2" down="1" total="3"/>
+    </runstats> <!-- Koniec statystyk -->
+
+</nmaprun> <!-- Koniec dokumentu -->
