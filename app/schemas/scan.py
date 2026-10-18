@@ -9,6 +9,8 @@ Protocol = Literal["tcp", "udp", "sctp", "ip"]
 # Wszystkie stany portu, jakie nmap może zwrócić (open|filtered to jeden stan, np. przy skanie UDP)
 PortState = Literal["open", "closed", "filtered", "unfiltered", "open|filtered", "closed|filtered"]
 HostState = Literal["up", "down", "unknown", "skipped"]
+# Typy skanu, które użytkownik może wybrać — słowa, NIE flagi nmapa
+ScanType = Literal["connect", "syn", "udp", "ping"]
 
 # Wyrażenie regularne dla adresu MAC: 6 par znaków szesnastkowych oddzielonych ":"
 # np. AA:BB:CC:11:22:33
@@ -20,6 +22,25 @@ class NetScopeModel(BaseModel):
     # frozen=True    → obiektu nie da się zmienić po utworzeniu (wynik skanu to fakt historyczny)
     # extra="forbid" → nieznane pole (np. literówka "prot=") to błąd, a nie cicho ignorowana wartość
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+# To, co przychodzi z formularza: jeden skan do wykonania
+class ScanRequest(NetScopeModel):
+    # Cel skanu: IP, sieć CIDR albo nazwa hosta.
+    # Tu sprawdzamy tylko długość (253 = maks. długość nazwy w DNS);
+    # czy to POPRAWNY adres, sprawdzi walidator w kroku 3b
+    target: str = Field(min_length=1, max_length=253)
+    # Typ skanu z listy ScanType; domyślnie connect, bo działa bez roota
+    scan_type: ScanType = "connect"
+    # Porty jako tekst, np. "22,80,443" albo "1-1000"; None = domyślne porty nmapa.
+    # Format sprawdzi walidator w kroku 3b
+    ports: str | None = Field(default=None, min_length=1, max_length=200)
+    # Wykrywanie wersji usług (-sV)
+    service_detection: bool = False
+    # Wykrywanie systemu operacyjnego (-O), wymaga roota
+    os_detection: bool = False
+    # Szybkość skanu: 0 (najwolniej) … 5 (najszybciej); 3 = domyślna w nmapie
+    timing: int = Field(default=3, ge=0, le=5)
 
 
 # Jeden port z <port>
