@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?> <!-- Deklaracja XML: wersja 1.0, kodowanie UTF-8. Musi być pierwszą linią pliku, więc komentarz stoi za nią -->
+<!DOCTYPE nmaprun> <!-- Deklaracja typu dokumentu. Prawdziwy nmap zawsze ją dodaje; defusedxml przepuszcza samą deklarację, ale zablokowałby zdefiniowane w niej encje (XXE) -->
+<?xml-stylesheet href="file:///usr/share/nmap/nmap.xsl" type="text/xsl"?> <!-- Arkusz XSL, dzięki któremu przeglądarka wyświetla plik jako stronę HTML. Parser go ignoruje -->
+
+<!-- Korzeń dokumentu. Atrybuty:
+     scanner           = program, który wygenerował plik
+     args              = pełne polecenie: skan TCP connect (-sT), wykrywanie wersji usług (-sV),
+                         porty 22, 80, 443 (-p), wynik XML na standardowe wyjście (-oX -), cel 192.168.1.1
+     start / startstr  = czas startu jako Unix timestamp i jako czytelny tekst
+     version           = wersja nmapa
+     xmloutputversion  = wersja formatu XML (ważne, jeśli format kiedyś się zmieni) -->
+<nmaprun scanner="nmap" args="nmap -sT -sV -p 22,80,443 -oX - 192.168.1.1" start="1792173600" startstr="Fri Oct 16 20:00:00 2026" version="7.95" xmloutputversion="1.05">
+
+    <!-- Informacje o typie skanu: connect (pełne połączenie TCP, nie wymaga roota), protokół TCP, 3 skanowane porty i ich lista -->
+    <scaninfo type="connect" protocol="tcp" numservices="3" services="22,80,443"/>
+
+    <verbose level="0"/>   <!-- Poziom szczegółowości (-v). 0 = brak dodatkowych komunikatów -->
+    <debugging level="0"/> <!-- Poziom debugowania (-d). 0 = wyłączony -->
+
+    <!-- Jeden przeskanowany host. starttime / endtime = kiedy zaczęto i skończono skanować właśnie ten host -->
+    <host starttime="1792173600" endtime="1792173612">
+
+        <!-- Stan hosta: up (odpowiada). reason = dlaczego nmap tak uznał (dostał SYN-ACK). reason_ttl = TTL odpowiedzi -->
+        <status state="up" reason="syn-ack" reason_ttl="0"/>
+
+        <!-- Adres hosta i jego typ (ipv4, ipv6 albo mac) -->
+        <address addr="192.168.1.1" addrtype="ipv4"/>
+
+        <!-- Lista nazw hosta (może być pusta albo zawierać kilka pozycji) -->
+        <hostnames>
+            <!-- Nazwa z odwrotnego DNS (PTR = rekord zamieniający IP na nazwę) -->
+            <hostname name="router.lan" type="PTR"/>
+        </hostnames> <!-- Koniec listy nazw -->
+
+        <!-- Lista portów tego hosta -->
+        <ports>
+
+            <!-- Port 22 TCP -->
+            <port protocol="tcp" portid="22">
+                <!-- Stan portu: open. Powód: odpowiedź SYN-ACK -->
+                <state state="open" reason="syn-ack" reason_ttl="0"/>
+                <!-- Usługa na porcie (wynik -sV):
+                     name      = nazwa usługi (ssh)
+                     product   = oprogramowanie (OpenSSH)
+                     version   = wersja oprogramowania
+                     extrainfo = dodatkowe informacje z banera
+                     ostype    = system operacyjny odgadnięty z usługi
+                     method    = probed, czyli nmap faktycznie wysłał sondy i rozpoznał usługę
+                     conf      = pewność rozpoznania w skali 0 do 10 (10 = pewne) -->
+                <service name="ssh" product="OpenSSH" version="9.6p1 Ubuntu 3ubuntu13.5" extrainfo="Ubuntu Linux; protocol 2.0" ostype="Linux" method="probed" conf="10">
+                    <!-- CPE: standardowy identyfikator oprogramowania, używany np. do wyszukiwania podatności (CVE) -->
+                    <cpe>cpe:/a:openbsd:openssh:9.6p1</cpe> <!-- a = aplikacja: OpenSSH 9.6p1 -->
+                    <cpe>cpe:/o:linux:linux_kernel</cpe>    <!-- o = system operacyjny: jądro Linux. Jedna usługa może mieć kilka CPE -->
+                </service> <!-- Koniec opisu usługi -->
+            </port> <!-- Koniec portu 22 -->
+
+            <!-- Port 80 TCP -->
+            <port protocol="tcp" portid="80">
+                <!-- Stan: open -->
+                <state state="open" reason="syn-ack" reason_ttl="0"/>
+                <!-- Usługa http: serwer nginx 1.24.0 na Ubuntu, rozpoznany z pełną pewnością -->
+                <service name="http" product="nginx" version="1.24.0" extrainfo="Ubuntu" ostype="Linux" method="probed" conf="10">
+                    <cpe>cpe:/a:igor_sysoev:nginx:1.24.0</cpe> <!-- CPE nginxa (producent w CPE to autor, Igor Sysoev) -->
+                </service> <!-- Koniec opisu usługi -->
+            </port> <!-- Koniec portu 80 -->
+
+            <!-- Port 443 TCP -->
+            <port protocol="tcp" portid="443">
+                <!-- Stan: closed. conn-refused = system odrzucił połączenie, nic tu nie nasłuchuje -->
+                <state state="closed" reason="conn-refused" reason_ttl="0"/>
+                <!-- Usługa tylko zgadnięta z tabeli numerów portów (method="table", niska pewność conf="3").
+                     Brak product i version: parser musi traktować te pola jako opcjonalne -->
+                <service name="https" method="table" conf="3"/>
+            </port> <!-- Koniec portu 443 -->
+
+        </ports> <!-- Koniec listy portów -->
+
+        <!-- Czasy odpowiedzi w mikrosekundach: srtt = średni czas round trip, rttvar = jego zmienność, to = timeout -->
+        <times srtt="512" rttvar="210" to="100000"/>
+
+    </host> <!-- Koniec hosta 192.168.1.1 -->
+
+    <!-- Statystyki całego skanu -->
+    <runstats>
+        <!-- Zakończenie skanu: czas (timestamp i tekst), podsumowanie, czas trwania w sekundach, exit = success (skan zakończył się poprawnie) -->
+        <finished time="1792173612" timestr="Fri Oct 16 20:00:12 2026" summary="Nmap done at Fri Oct 16 20:00:12 2026; 1 IP address (1 host up) scanned in 12.34 seconds" elapsed="12.34" exit="success"/>
+        <!-- Liczba hostów: 1 aktywny, 0 nieaktywnych, 1 łącznie -->
+        <hosts up="1" down="0" total="1"/>
+    </runstats> <!-- Koniec statystyk -->
+
+</nmaprun> <!-- Koniec dokumentu -->
