@@ -1,6 +1,7 @@
+from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, IPvAnyAddress
+from pydantic import BaseModel, ConfigDict, Field, IPvAnyAddress, model_validator
 
 # Literal = dozwolona jest TYLKO jedna z wymienionych wartości (allowlista na poziomie typu).
 # Wartości spoza listy, np. state="hacked", dadzą ValidationError
@@ -50,3 +51,24 @@ class HostResult(NetScopeModel):
     hostnames: list[str] = Field(default_factory=list)
     ports: list[PortResult] = Field(default_factory=list)          # host down → pusta lista
     extra_ports: list[ExtraPortsResult] = Field(default_factory=list)
+
+
+# Cały skan z <nmaprun>
+class ScanResult(NetScopeModel):
+    nmap_version: str                     # np. "7.95"
+    args: str                             # pełne polecenie nmapa
+    started_at: datetime                  # parser zamieni Unix timestamp na datę
+    finished_at: datetime | None = None   # None, gdy skan przerwany (brak <finished>)
+    elapsed_seconds: float | None = Field(default=None, ge=0)
+    hosts_up: int = Field(ge=0)
+    hosts_down: int = Field(ge=0)
+    hosts_total: int = Field(ge=0)
+    hosts: list[HostResult] = Field(default_factory=list)
+
+    # Walidator CAŁEGO obiektu, uruchamiany po sprawdzeniu pojedynczych pól (mode="after").
+    # Sprawdza zależność między polami, której nie da się wyrazić typem jednego pola
+    @model_validator(mode="after")
+    def check_host_counts(self) -> "ScanResult":
+        if self.hosts_up + self.hosts_down != self.hosts_total:
+            raise ValueError("hosts_up + hosts_down must equal hosts_total")
+        return self

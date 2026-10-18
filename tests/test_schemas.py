@@ -1,7 +1,9 @@
+from datetime import datetime, timezone
+
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.scan import ExtraPortsResult, HostResult, PortResult
+from app.schemas.scan import ExtraPortsResult, HostResult, PortResult, ScanResult
 
 
 # Pomocnik: poprawny port z minimalnymi danymi; overrides podmienia wybrane pola,
@@ -106,3 +108,48 @@ def test_host_result_nests_ports():
 
     assert host.ports[0].port == 22
     assert host.extra_ports[0].count == 997
+
+
+# Pomocnik: poprawny, minimalny wynik skanu (1 host up)
+def make_scan(**overrides) -> ScanResult:
+    data = {
+        "nmap_version": "7.95",
+        "args": "nmap -sT 192.168.1.1",
+        "started_at": datetime(2026, 10, 16, 18, 0, tzinfo=timezone.utc),
+        "hosts_up": 1,
+        "hosts_down": 0,
+        "hosts_total": 1,
+    }
+    data.update(overrides)
+    return ScanResult(**data)
+
+
+def test_scan_result_minimal():
+    scan = make_scan()
+
+    # Skan bez <finished> (np. przerwany) i bez hostów jest poprawny
+    assert scan.finished_at is None
+    assert scan.hosts == []
+
+
+def test_scan_result_rejects_inconsistent_host_counts():
+    # model_validator: 2 + 0 != 3 → błąd z naszym komunikatem
+    with pytest.raises(ValidationError, match="must equal hosts_total"):
+        make_scan(hosts_up=2, hosts_down=0, hosts_total=3)
+
+
+def test_scan_result_rejects_negative_elapsed_time():
+    with pytest.raises(ValidationError):
+        make_scan(elapsed_seconds=-1)
+
+
+def test_scan_result_serializes_to_json_types():
+    scan = make_scan(hosts=[HostResult(state="up", ip="192.168.1.1", ports=[make_port()])])
+
+    # model_dump(mode="json") zamienia obiekty na typy JSON (tak wyśle je API w kroku 4):
+    # datetime → tekst ISO 8601, IPvAnyAddress → tekst
+    data = scan.model_dump(mode="json")
+
+    assert data["started_at"] == "2026-10-16T18:00:00Z"
+    assert data["hosts"][0]["ip"] == "192.168.1.1"
+    assert data["hosts"][0]["ports"][0]["port"] == 22
