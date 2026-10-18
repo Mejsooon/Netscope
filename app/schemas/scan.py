@@ -42,6 +42,14 @@ class ScanRequest(NetScopeModel):
     # Szybkość skanu: 0 (najwolniej) … 5 (najszybciej); 3 = domyślna w nmapie
     timing: int = Field(default=3, ge=0, le=5)
 
+    # Ping scan (-sn) tylko sprawdza, które hosty żyją — NIE skanuje portów.
+    # Porty, wersje usług i wykrywanie systemu nie mają wtedy sensu, więc je odrzucamy
+    @model_validator(mode="after")
+    def check_ping_scan_options(self) -> "ScanRequest":
+        if self.scan_type == "ping" and (self.ports or self.service_detection or self.os_detection):
+            raise ValueError("ping scan only discovers hosts: ports, service and OS detection are not allowed")
+        return self
+
 
 # Jeden port z <port>
 class PortResult(NetScopeModel):
